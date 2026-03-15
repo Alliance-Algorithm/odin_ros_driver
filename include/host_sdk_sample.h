@@ -26,7 +26,7 @@ limitations under the License.
 #include <iomanip>
 #include <cstring>
 #include <opencv2/opencv.hpp>
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 #include <thread>
 #include <Eigen/Dense>
 #include <atomic>

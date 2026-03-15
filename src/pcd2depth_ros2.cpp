@@ -11,6 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include "package_path_resolver.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <fstream>
 #include <sys/stat.h>
@@ -19,7 +20,6 @@ limitations under the License.
 #include <fstream>
 #include <string>
 #include "depth_image_ros2_node.hpp"
-#include <rcpputils/filesystem_helper.hpp>
 bool fileExists(const std::string& filename) {
     struct stat buffer;
     return (stat(filename.c_str(), &buffer) == 0);
@@ -118,24 +118,6 @@ bool loadCalibParameters(std::shared_ptr<rclcpp::Node> node, const std::string& 
         return false;
     }
 }
-std::string get_package_source_directory() {
-    // 使用 rcpputils::fs::path 替代 std::filesystem::path
-    rcpputils::fs::path current_file(__FILE__);
-    
-    // 回溯到包根目录
-    auto path = current_file.parent_path();
-    
-    // 使用 rcpputils::fs::exists 替代 std::filesystem::exists
-    while (!path.empty() && !rcpputils::fs::exists(path / "package.xml")) {
-        path = path.parent_path();
-    }
-    
-    if (path.empty()) {
-        throw std::runtime_error("Failed to locate package root directory");
-    }
-    
-    return path.string();
-}
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -143,13 +125,13 @@ int main(int argc, char **argv)
 
     auto node = std::make_shared<rclcpp::Node>("pcd2depth_node");
     RCLCPP_INFO(node->get_logger(), "Node created");
-    std::string package_path = get_package_source_directory();
-    RCLCPP_INFO(node->get_logger(), "Package path: %s", package_path.c_str());
-    
-    std::string config_file = package_path + "/config/control_command.yaml";
-    RCLCPP_INFO(node->get_logger(), "Loading config from: %s", config_file.c_str());
+    const auto config_file = odin_ros_driver::paths::resolve_path(
+        "odin_ros_driver",
+        "",
+        std::filesystem::path("config") / "control_command.yaml");
+    RCLCPP_INFO(node->get_logger(), "Loading config from: %s", config_file.string().c_str());
 
-    YAML::Node config = YAML::LoadFile(config_file);
+    YAML::Node config = YAML::LoadFile(config_file.string());
         
     if (!config["register_keys"]) {
             throw std::runtime_error("Missing 'register_keys' section");
@@ -166,7 +148,17 @@ int main(int argc, char **argv)
         return 0;
     }
     
-    std::string calib_file_path = node->declare_parameter<std::string>("calib_file_path", "");
+    const auto default_calib_file = odin_ros_driver::paths::resolve_path(
+        "odin_ros_driver",
+        "",
+        std::filesystem::path("config") / "calib.yaml");
+    std::string calib_file_path = node->declare_parameter<std::string>(
+        "calib_file_path",
+        default_calib_file.string());
+    calib_file_path = odin_ros_driver::paths::resolve_path(
+        "odin_ros_driver",
+        calib_file_path,
+        std::filesystem::path("config") / "calib.yaml").string();
     
     RCLCPP_INFO(node->get_logger(), "Waiting for calib.yaml file at: %s", calib_file_path.c_str());
     while(rclcpp::ok() && !fileExists(calib_file_path))

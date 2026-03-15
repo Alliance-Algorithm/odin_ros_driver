@@ -12,6 +12,7 @@ limitations under the License.
 */
 
 #include "host_sdk_sample.h"
+#include "package_path_resolver.hpp"
 #include "yaml_parser.h"
 #include "rawCloudRender.h"
 #include <filesystem> 
@@ -40,10 +41,8 @@ limitations under the License.
 #include <iomanip>
 #include <sstream>
 #ifdef ROS2
-    #include <ament_index_cpp/get_package_share_directory.hpp>
     #include <rclcpp/rclcpp.hpp>
 #else
-    #include <ros/package.h>
     #include <ros/ros.h> 
 #endif
 #define ros_driver_version "0.9.0"
@@ -125,6 +124,11 @@ int g_cloud_raw_confidence_threshold = 35;
 int g_dtof_fps = 145;  // DTOF sensor frame rate: 100 (10fps) or 145 (14.5fps)
 
 std::filesystem::path log_root_dir_;
+std::filesystem::path g_package_root_dir;
+std::filesystem::path g_config_root_dir;
+std::filesystem::path g_data_root_dir;
+std::filesystem::path g_log_base_dir;
+std::filesystem::path g_map_base_dir;
 int g_custom_map_mode = 0;
 bool g_relocalization_success_msg_printed = false;
 
@@ -715,49 +719,6 @@ static bool convert_calib_to_cam_in_ex(const std::string& calib_path, const std:
     }
 }
 
-// Get package share path
-std::string get_package_share_path(const std::string& package_name) {
-#ifdef ROS2
-    try {
-        return ament_index_cpp::get_package_share_directory(package_name);
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Package not found: " + std::string(e.what()));
-    }
-#else
-    try {
-        return ros::package::getPath(package_name);
-    } catch (const ros::InvalidNameException& e) {
-        throw std::runtime_error("Package not found: " + std::string(e.what()));
-    }
-#endif
-}
-
-std::string get_package_source_directory() {
-    // 获取当前源文件的绝对路径
-    std::filesystem::path current_file(__FILE__);
-    
-    // 回溯到包根目录（包含package.xml的目录）
-    auto path = current_file.parent_path();
-    while (!path.empty() && !std::filesystem::exists(path / "package.xml")) {
-        path = path.parent_path();
-    }
-    
-    if (path.empty()) {
-        throw std::runtime_error("Failed to locate package root directory");
-    }
-    
-    return path.string();
-}
-
-
-std::string get_package_path(const std::string& package_name) {
-    #ifdef ROS2
-        return ament_index_cpp::get_package_share_directory(package_name);
-    #else
-        return ros::package::getPath(package_name);
-    #endif
-}
-
 // Clear all queues
 void clear_all_queues() {
     // Reset state variables
@@ -1091,25 +1052,8 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             #endif
             return;
         }
-	const std::string package_name = "odin_ros_driver";
-	std::string config_dir = "";
-	#ifdef ROS2
-	    char* ros_workspace = std::getenv("COLCON_PREFIX_PATH");
-	    if (ros_workspace) {
-		std::string workspace_path(ros_workspace);
-		size_t pos = workspace_path.find("/install");
-		if (pos != std::string::npos) {
-		    config_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/config";
-		} else {
-		    config_dir = ament_index_cpp::get_package_share_directory(package_name) + "/config";
-		}
-	    } else {
-		config_dir = ament_index_cpp::get_package_share_directory(package_name) + "/config";
-	    }
-	#else
-	    config_dir = ros::package::getPath(package_name) + "/config";
-	#endif
-   		 std::cout << "config_dir"<< config_dir <<std::endl;
+        const std::string config_dir = g_config_root_dir.string();
+        std::cout << "config_dir" << config_dir << std::endl;
         #ifdef ROS2
             RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Calibration files will be saved to: %s", config_dir.c_str());
         #else
@@ -1599,6 +1543,7 @@ int main(int argc, char *argv[])
 #else
     ros::init(argc, argv, "lydros_node");
     ros::NodeHandle nh;
+    ros::NodeHandle pnh("~");
     g_ros_object = new MultiSensorPublisher(nh);
 #endif
 
@@ -1607,14 +1552,32 @@ int main(int argc, char *argv[])
     signal(SIGTERM, signal_handler);
 
     try {
+        const std::string package_name = "odin_ros_driver";
+        std::string config_file_param;
     #ifdef ROS2
-        std::string package_path = get_package_source_directory();
-        std::cout << "package_path: " << package_path << std::endl;
+        config_file_param = node->declare_parameter<std::string>("config_file", "");
     #else
-    	std::string package_path = get_package_share_path("odin_ros_driver");
+        pnh.param<std::string>("config_file", config_file_param, "");
     #endif
-        std::string config_dir = package_path + "/config";
-        std::string config_file = config_dir + "/control_command.yaml";
+
+        g_package_root_dir = odin_ros_driver::paths::find_package_directory(package_name);
+        g_config_root_dir = odin_ros_driver::paths::find_config_dir(package_name);
+        g_data_root_dir = g_package_root_dir / "recorddata";
+        g_log_base_dir = g_package_root_dir / "log";
+        g_map_base_dir = g_package_root_dir / "map";
+
+        const auto config_file = odin_ros_driver::paths::resolve_path(
+            package_name,
+            config_file_param,
+            std::filesystem::path("config") / "control_command.yaml");
+
+        #ifdef ROS2
+            RCLCPP_INFO(node->get_logger(), "Resolved package directory: %s", g_package_root_dir.string().c_str());
+            RCLCPP_INFO(node->get_logger(), "Loading config file: %s", config_file.string().c_str());
+        #else
+            ROS_INFO("Resolved package directory: %s", g_package_root_dir.string().c_str());
+            ROS_INFO("Loading config file: %s", config_file.string().c_str());
+        #endif
 
         // Initialize command file path to /tmp/odin_command.txt
         g_command_file_path = "/tmp/odin_command.txt";
@@ -1625,12 +1588,12 @@ int main(int argc, char *argv[])
             ROS_INFO("Command file path set to: %s", g_command_file_path.c_str());
         #endif
 
-        g_parser = std::make_shared<odin_ros_driver::YamlParser>(config_file);
+        g_parser = std::make_shared<odin_ros_driver::YamlParser>(config_file.string());
         if (!g_parser->loadConfig()) {
             #ifdef ROS2
-                RCLCPP_ERROR(node->get_logger(), "Failed to load config file: %s", config_file.c_str());
+                RCLCPP_ERROR(node->get_logger(), "Failed to load config file: %s", config_file.string().c_str());
             #else
-                ROS_ERROR("Failed to load config file: %s", config_file.c_str());
+                ROS_ERROR("Failed to load config file: %s", config_file.string().c_str());
             #endif
             return -1;
         }
@@ -1684,34 +1647,9 @@ int main(int argc, char *argv[])
 
         lidar_log_set_level(LIDAR_LOG_INFO);
 
-        const std::string package_name = "odin_ros_driver";
-        std::string data_dir = "";
-        std::string log_dir = "";
-        std::string map_dir = "";
-        #ifdef ROS2
-            char* ros_workspace = std::getenv("COLCON_PREFIX_PATH");
-            if (ros_workspace) {
-                std::string workspace_path(ros_workspace);
-                size_t pos = workspace_path.find("/install");
-                if (pos != std::string::npos) {
-                    data_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/recorddata";
-                    log_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/log";
-                    map_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/map";
-                } else {
-                    data_dir = ament_index_cpp::get_package_share_directory(package_name) + "/recorddata";
-                    log_dir = ament_index_cpp::get_package_share_directory(package_name) + "/log";
-                    map_dir = ament_index_cpp::get_package_share_directory(package_name) + "/map";
-                }
-            } else {
-                data_dir = ament_index_cpp::get_package_share_directory(package_name) + "/recorddata";
-                log_dir = ament_index_cpp::get_package_share_directory(package_name) + "/log";
-                map_dir = ament_index_cpp::get_package_share_directory(package_name) + "/map";
-            }
-        #else
-            data_dir = ros::package::getPath(package_name) + "/recorddata";
-            log_dir = ros::package::getPath(package_name) + "/log";
-            map_dir = ros::package::getPath(package_name) + "/map";
-        #endif
+        const std::string data_dir = g_data_root_dir.string();
+        const std::string log_dir = g_log_base_dir.string();
+        const std::string map_dir = g_map_base_dir.string();
 
         if (g_record_data) {
             g_ros_object->initialize_data_logger(data_dir);
@@ -1738,6 +1676,11 @@ int main(int argc, char *argv[])
             std::filesystem::create_directories(map_root_dir_);
         }
 
+        #ifdef ROS2
+            RCLCPP_INFO(node->get_logger(), "Calling lidar_system_init()");
+        #else
+            ROS_INFO("Calling lidar_system_init()");
+        #endif
         if (lidar_system_init(lidar_device_callback)) {
             #ifdef ROS2
                 RCLCPP_ERROR(node->get_logger(), "Lidar system init failed");
@@ -1746,10 +1689,16 @@ int main(int argc, char *argv[])
             #endif
             return -1;
         }
+        #ifdef ROS2
+            RCLCPP_INFO(node->get_logger(), "lidar_system_init() succeeded; waiting for device attach callback");
+        #else
+            ROS_INFO("lidar_system_init() succeeded; waiting for device attach callback");
+        #endif
         
 
         bool usbPresent = false;
         bool usbVersionChecked = false; 
+        auto next_waiting_log_time = std::chrono::steady_clock::now();
         while (!deviceConnected) {
             #ifdef ROS2
             if (!rclcpp::ok()) {
@@ -1763,6 +1712,38 @@ int main(int argc, char *argv[])
             #endif
 
             usbPresent = isUsbDevicePresent(TARGET_VENDOR, TARGET_PRODUCT); 
+            auto now = std::chrono::steady_clock::now();
+            if (now >= next_waiting_log_time) {
+                if (usbPresent) {
+                    #ifdef ROS2
+                        RCLCPP_WARN(
+                            node->get_logger(),
+                            "USB device %s:%s is visible, but the SDK attach callback has not fired yet",
+                            TARGET_VENDOR.c_str(),
+                            TARGET_PRODUCT.c_str());
+                    #else
+                        ROS_WARN(
+                            "USB device %s:%s is visible, but the SDK attach callback has not fired yet",
+                            TARGET_VENDOR.c_str(),
+                            TARGET_PRODUCT.c_str());
+                    #endif
+                } else {
+                    #ifdef ROS2
+                        RCLCPP_INFO(
+                            node->get_logger(),
+                            "Waiting for USB device %s:%s to appear",
+                            TARGET_VENDOR.c_str(),
+                            TARGET_PRODUCT.c_str());
+                    #else
+                        ROS_INFO(
+                            "Waiting for USB device %s:%s to appear",
+                            TARGET_VENDOR.c_str(),
+                            TARGET_PRODUCT.c_str());
+                    #endif
+                }
+                next_waiting_log_time = now + std::chrono::seconds(5);
+            }
+
             if (usbPresent) { 
                 if (!usbVersionChecked) {
                     usbVersionChecked = true;

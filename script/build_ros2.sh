@@ -74,6 +74,8 @@ build_workspace() {
         source "/opt/ros/galactic/setup.bash"
     elif [ -f "/opt/ros/humble/setup.bash" ]; then
         source "/opt/ros/humble/setup.bash"
+    elif [ -f "/opt/ros/jazzy/setup.bash" ]; then
+        source "/opt/ros/jazzy/setup.bash"
     else
         echo -e "${RED}Could not find ROS2 setup.bash file. Please ensure ROS2 is installed.${NC}"
         return 1

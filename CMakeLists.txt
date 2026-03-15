@@ -230,6 +230,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     
     # Find all necessary ROS2 packages
     find_package(ament_cmake REQUIRED)
+    find_package(ament_index_cpp REQUIRED)
     find_package(rclcpp REQUIRED)
     find_package(std_msgs REQUIRED)
     find_package(sensor_msgs REQUIRED)
@@ -261,10 +262,11 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     
     # Add ROS2 dependencies
     ament_target_dependencies(host_sdk_sample
-        rclcpp 
-        std_msgs 
-        sensor_msgs 
-        nav_msgs 
+        ament_index_cpp
+        rclcpp
+        std_msgs
+        sensor_msgs
+        nav_msgs
         visualization_msgs
         cv_bridge
         image_transport
