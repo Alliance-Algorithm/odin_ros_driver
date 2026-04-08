@@ -753,7 +753,8 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             printf("empty lidar data type: %x\n", data->type);
             break;
         case LIDAR_DT_RAW_RGB:
-            if (g_sendrgb) {
+            if (g_sendrgb || g_sendrgb_compressed || g_sendrgb_undistort || g_sendcloudrender
+                || g_record_data) {
                 g_ros_object->publishRgb((capture_Image_List_t *)&data->stream);
             }
             update_count(&rgb_rx_fps);
