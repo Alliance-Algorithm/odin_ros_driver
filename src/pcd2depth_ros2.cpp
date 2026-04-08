@@ -127,7 +127,7 @@ int main(int argc, char **argv)
     RCLCPP_INFO(node->get_logger(), "Node created");
     const auto config_file = odin_ros_driver::paths::resolve_path(
         "odin_ros_driver",
-        "",
+        node->declare_parameter<std::string>("config_file", ""),
         std::filesystem::path("config") / "control_command.yaml");
     RCLCPP_INFO(node->get_logger(), "Loading config from: %s", config_file.string().c_str());
 

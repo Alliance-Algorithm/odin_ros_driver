@@ -317,6 +317,12 @@ elseif(ROS_VERSION STREQUAL "ROS2")
         message_filters
     )
 
+    add_executable(odin_to_lio_bridge src/odin_to_lio_bridge.cpp)
+    ament_target_dependencies(odin_to_lio_bridge
+        rclcpp
+        sensor_msgs
+    )
+
     add_library(cloud_reprojector_ros2 src/cloud_reprojector.cpp)
     target_compile_definitions(cloud_reprojector_ros2 PRIVATE ROS2)
     target_link_libraries(cloud_reprojector_ros2
@@ -344,10 +350,11 @@ elseif(ROS_VERSION STREQUAL "ROS2")
 
     # Installation rules - ensure all install targets are defined before ament_package()
     # Install executable
-    install(TARGETS 
-        host_sdk_sample 
+    install(TARGETS
+        host_sdk_sample
         pcd2depth_ros2_node
         cloud_reprojection_ros2_node
+        odin_to_lio_bridge
         EXPORT export_${PROJECT_NAME}
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib

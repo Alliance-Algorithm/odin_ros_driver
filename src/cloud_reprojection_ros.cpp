@@ -203,7 +203,7 @@ int main(int argc, char** argv)
     // Check if reprojection is enabled from control_command.yaml
     const auto config_file = odin_ros_driver::paths::resolve_path(
         "odin_ros_driver",
-        "",
+        temp_node->declare_parameter<std::string>("config_file", ""),
         std::filesystem::path("config") / "control_command.yaml");
     
     try {
