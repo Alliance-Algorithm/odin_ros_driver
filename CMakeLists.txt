@@ -236,6 +236,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     
     # Find all necessary ROS2 packages
     find_package(ament_cmake REQUIRED)
+    find_package(ament_index_cpp REQUIRED)
     find_package(rclcpp REQUIRED)
     find_package(std_msgs REQUIRED)
     find_package(sensor_msgs REQUIRED)
@@ -267,6 +268,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     
     # Add ROS2 dependencies
     ament_target_dependencies(host_sdk_sample
+        ament_index_cpp
         rclcpp 
         std_msgs 
         sensor_msgs 
@@ -312,6 +314,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     )
     
     ament_target_dependencies(pcd2depth_ros2_node
+        ament_index_cpp
         rclcpp
         sensor_msgs
         std_msgs
@@ -337,6 +340,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
         yaml-cpp
     )
     ament_target_dependencies(cloud_reprojection_ros2_node
+        ament_index_cpp
         rclcpp
         sensor_msgs
         nav_msgs
@@ -407,6 +411,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     # Declare dependencies
     ament_export_dependencies(
         rclcpp 
+        ament_index_cpp
         std_msgs 
         sensor_msgs 
         nav_msgs 
@@ -444,4 +449,3 @@ message(STATUS "Target platform: ${TARGET_PLATFORM}")
 message(STATUS "lydHostApi library: ${LYD_HOST_API_LIB}")
 message(STATUS "libusb library: ${LIBUSB_LIBRARIES}")
 message(STATUS "=======================================")
-
