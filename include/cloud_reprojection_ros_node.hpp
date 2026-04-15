@@ -19,7 +19,7 @@ limitations under the License.
     #include <sensor_msgs/msg/image.hpp>
     #include <nav_msgs/msg/odometry.hpp>
     #include <image_transport/image_transport.hpp>
-    #include <cv_bridge/cv_bridge.h>
+    #include <cv_bridge/cv_bridge.hpp>
     #include <message_filters/subscriber.h>
     #include <message_filters/time_synchronizer.h>
     #include <message_filters/sync_policies/exact_time.h>

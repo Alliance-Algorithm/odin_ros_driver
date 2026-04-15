@@ -21,7 +21,7 @@ limitations under the License.
 #else
     #include <ros/ros.h>
     #include <sensor_msgs/Image.h>
-    #include <cv_bridge/cv_bridge.h>
+    #include <cv_bridge/cv_bridge.hpp>
     #include <message_filters/subscriber.h>
     #include <message_filters/sync_policies/approximate_time.h>
     #include <message_filters/synchronizer.h>
