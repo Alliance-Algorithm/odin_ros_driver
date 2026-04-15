@@ -290,10 +290,12 @@ int main(int argc, char** argv) {
         if (wait_count % 10 == 0) {
             RCLCPP_INFO(temp_node->get_logger(), "Still waiting for calib.yaml file...");
         }
+        // Timeout after 5 seconds
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
         wait_count++;
 
-        // Timeout after 5 seconds
+        // Timeout loop 10, so after 50 seconds,
+        // if the file is still not found, log an error and shutdown
         if (wait_count > 10) {
             RCLCPP_ERROR(temp_node->get_logger(), "Timeout waiting for calib.yaml file");
             rclcpp::shutdown();
