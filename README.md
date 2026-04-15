@@ -288,6 +288,7 @@ Odin_ROS_Driver/                // ROS1/ROS2 driver package
 | odin1_ros2.launch.py     | Launch file for ROS2 - Odin1 Basic Operations Demo |
 
 ### 4.2.1 ROS2 launch arguments
+
 | Launch Argument | Default | Description |
 |-----------------|---------|-------------|
 | `config_file` | `share/odin_ros_driver/config/control_command.yaml` | Read-only control YAML loaded from the installed package by default |
