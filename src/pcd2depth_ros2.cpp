@@ -150,11 +150,13 @@ int main(int argc, char** argv) {
     YAML::Node config = YAML::LoadFile(config_file);
 
     if (!config["register_keys"]) {
-        throw std::runtime_error("Missing 'register_keys' section");
+        RCLCPP_ERROR(node->get_logger(), "Missing 'register_keys' section in config file");
+        return 1;
     }
 
     if (!config["register_keys"]["senddepth"]) {
-        throw std::runtime_error("Missing 'senddepth' parameter");
+        RCLCPP_ERROR(node->get_logger(), "Missing 'senddepth' parameter in config file");
+        return 1;
     }
     int senddepth = config["register_keys"]["senddepth"].as<int>();
     std::cout << "senddepth: " << senddepth << std::endl;
