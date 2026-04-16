@@ -8,6 +8,12 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 
+def load_yaml_params(package_dir, config_name):
+    config_path = os.path.join(package_dir, "config", config_name)
+    with open(config_path, "r") as file:
+        return yaml.safe_load(file)
+
+
 def generate_launch_description():
     # Get package directory
     package_dir = get_package_share_directory("odin_ros_driver")
@@ -59,9 +65,7 @@ def generate_launch_description():
         ],
     )
 
-    pcd2depth_config_path = os.path.join(package_dir, "config", "control_command.yaml")
-    with open(pcd2depth_config_path, "r") as f:
-        pcd2depth_params = yaml.safe_load(f)
+    pcd2depth_params = load_yaml_params(package_dir, "control_command.yaml")
     pcd2depth_node = Node(
         package="odin_ros_driver",
         executable="pcd2depth_ros2_node",
@@ -77,11 +81,7 @@ def generate_launch_description():
     )
 
     # Cloud reprojection node
-    reprojection_config_path = os.path.join(
-        package_dir, "config", "control_command.yaml"
-    )
-    with open(reprojection_config_path, "r") as f:
-        reprojection_params = yaml.safe_load(f)
+    reprojection_params = load_yaml_params(package_dir, "control_command.yaml")
     cloud_reprojection_node = Node(
         package="odin_ros_driver",
         executable="cloud_reprojection_ros2_node",
@@ -97,9 +97,7 @@ def generate_launch_description():
     )
 
     # Image overlay node - overlays reprojected points on camera image
-    overlay_config_path = os.path.join(package_dir, "config", "control_command.yaml")
-    with open(overlay_config_path, "r") as f:
-        overlay_params = yaml.safe_load(f)
+    overlay_params = load_yaml_params(package_dir, "control_command.yaml")
     image_overlay_node = Node(
         package="odin_ros_driver",
         executable="image_overlay_node",
