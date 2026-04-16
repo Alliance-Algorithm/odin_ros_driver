@@ -16,12 +16,12 @@ limitations under the License.
 #ifdef ROS2
     #include <rclcpp/rclcpp.hpp>
     #include <sensor_msgs/msg/image.hpp>
-    #include <cv_bridge/cv_bridge.h>
+    #include <cv_bridge/cv_bridge.hpp>
     #include <mutex>
 #else
     #include <ros/ros.h>
     #include <sensor_msgs/Image.h>
-    #include <cv_bridge/cv_bridge.hpp>
+    #include <cv_bridge/cv_bridge.h>
     #include <message_filters/subscriber.h>
     #include <message_filters/sync_policies/approximate_time.h>
     #include <message_filters/synchronizer.h>

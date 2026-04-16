@@ -98,12 +98,13 @@ Reload rules and reinsert devices
 sudo udevadm control --reload
 sudo udevadm trigger
 ```
-### 3.2 OS Requirement
+### 3.2 Source Code
 ```shell
 git clone https://github.com/manifoldsdk/odin_ros_driver.git catkin_ws/src/odin_ros_driver
 ```
+
 Note:
-Please clone the source code into the "[ros_workspace]/src/" folder, otherwise compilation errors will occur.
+For source builds, clone the package into `[ros_workspace]/src/` as usual for a ROS workspace.
 
 ### 3.3 make
 
@@ -152,6 +153,50 @@ ros2 launch odin_ros_driver [launch file]
 ROS2 Demo Launch Instructions:
 ```shell
 ros2 launch odin_ros_driver odin1_ros2.launch.py
+```
+
+### 3.4.3 ROS2 runtime paths and relocatable install trees
+
+ROS2 now separates read-only package assets from writable runtime outputs.
+
+- Static package assets are resolved from the installed package share directory.
+  - `config/control_command.yaml`
+  - `launch/odin1_ros2.launch.py`
+  - RViz configuration files
+- Generated runtime files are written to a writable runtime directory.
+  - `calib.yaml`
+  - `recorddata/`
+  - `log/`
+  - `map/`
+
+Default ROS2 runtime paths:
+
+- `config_file`: `<install_prefix>/share/odin_ros_driver/config/control_command.yaml`
+- `runtime_dir`: `~/.ros/odin_ros_driver`
+- `calib_file_path`: `~/.ros/odin_ros_driver/calib.yaml`
+
+This means a copied ROS2 install tree can be relocated and launched from another machine, for example:
+
+```shell
+source /ros_install/setup.bash
+ros2 launch odin_ros_driver odin1_ros2.launch.py
+```
+
+The install tree under `/ros_install` can remain read-only. Generated files are not written back into `share/odin_ros_driver/config`.
+
+You can override the runtime paths at launch time:
+
+```shell
+ros2 launch odin_ros_driver odin1_ros2.launch.py \
+  runtime_dir:=/tmp/odin_runtime \
+  calib_file_path:=/tmp/odin_runtime/calib.yaml
+```
+
+You can also override the control YAML path explicitly:
+
+```shell
+ros2 launch odin_ros_driver odin1_ros2.launch.py \
+  config_file:=/custom/path/control_command.yaml
 ```
 
 ### 3.5 Operation Mode:
@@ -219,7 +264,7 @@ Odin_ROS_Driver/                // ROS1/ROS2 driver package
         cloud_reprojector.hpp   // Core class for cloud reprojection
     config/
         control_command.yaml    // Control parameter file for driver
-        calib.yaml              // Machine calibration yaml，differ for each individual device. Retrieved from the device everytime it connects to ROS driver
+        calib.yaml              // Example/default calibration yaml in source tree; ROS2 runtime calibration is generated into calib_file_path
     launch_ROS1/
         odin1_ros1.launch       // ROS1 launch file
     launch_ROS2/
@@ -227,8 +272,8 @@ Odin_ROS_Driver/                // ROS1/ROS2 driver package
     script/
         build_ros1.sh           // Installation script for ROS1
         build_ros2.sh           // Installation script for ROS2
-    recorddata/                 // holds recorded data that can import into MindCloud
-    log/                        // holds log files
+    recorddata/                 // ROS1/source-tree runtime output directory
+    log/                        // ROS1/source-tree log directory
         Driver_{timestamp}/     // holds all log folders for each time driver started
             Conn_{timestamp}/   // holds all log files for each odin1 device connection
                 dev_status.csv  // device status log file
@@ -241,6 +286,15 @@ Odin_ROS_Driver/                // ROS1/ROS2 driver package
 |--------------------------|-------------|
 | odin1_ros1.launch        | Launch file for ROS1 - Odin1 Basic Operations Demo |
 | odin1_ros2.launch.py     | Launch file for ROS2 - Odin1 Basic Operations Demo |
+
+### 4.2.1 ROS2 launch arguments
+
+| Launch Argument | Default | Description |
+|-----------------|---------|-------------|
+| `config_file` | `share/odin_ros_driver/config/control_command.yaml` | Read-only control YAML loaded from the installed package by default |
+| `runtime_dir` | `~/.ros/odin_ros_driver` | Writable base directory for ROS2 runtime outputs |
+| `calib_file_path` | `~/.ros/odin_ros_driver/calib.yaml` | Generated calibration file path used by downstream ROS2 nodes |
+| `rviz_config` | `share/odin_ros_driver/config/odin_ros2.rviz` | RViz2 configuration file |
 
 
 ### 4.3 ROS topics

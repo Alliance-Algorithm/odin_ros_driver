@@ -13,23 +13,22 @@ limitations under the License.
 
 #include "cloud_reprojection_ros_node.hpp"
 
+#include <chrono>
 #include <fstream>
 #include <sys/stat.h>
 #include <thread>
-#include <chrono>
 
 #ifdef ROS2
-    #include <functional>
-    #include <yaml-cpp/yaml.h>
-    #include <rcpputils/filesystem_helper.hpp>
+# include <ament_index_cpp/get_package_share_directory.hpp>
+# include <functional>
+# include <yaml-cpp/yaml.h>
 #else
-    #include <boost/bind.hpp>
+# include <boost/bind.hpp>
 #endif
 
 // Fixed Til (T_imu_lidar): lidar position in imu frame, transforms from lidar to imu
 // TODO: Fill in the actual Til values for your sensor setup
-static Eigen::Matrix4d getFixedTil()
-{
+static Eigen::Matrix4d getFixedTil() {
     Eigen::Matrix4d Til = Eigen::Matrix4d::Identity();
     Til(0, 3) = -0.02663;
     Til(1, 3) = 0.03447;
@@ -43,44 +42,40 @@ static bool fileExists(const std::string& filename) {
 }
 
 #ifdef ROS2
-// Helper function to get package source directory for ROS2
-static std::string get_package_source_directory() {
-    std::string current_file = __FILE__;
-    size_t pos = current_file.find("/src/cloud_reprojection_ros.cpp");
-    if (pos != std::string::npos) {
-        return current_file.substr(0, pos);
-    }
-    return "";
+
+static std::string getDefaultConfigFilePath() {
+    return ament_index_cpp::get_package_share_directory("odin_ros_driver")
+         + "/config/control_command.yaml";
 }
 
 // ==================== ROS2 Implementation ====================
 
 CloudReprojectionRosNode::CloudReprojectionRosNode(const rclcpp::NodeOptions& options)
-    : Node("cloud_reprojection_node", options)
-{
+    : Node("cloud_reprojection_node", options) {
     loadParameters();
 
-    RCLCPP_INFO_STREAM(this->get_logger(), 
-        "\n  cloud_slam_topic: " << cloud_slam_topic_
-        << "\n  odometry_topic: " << odometry_topic_
-        << "\n  wiwc_topic: " << wiwc_topic_
-        << "\n  reprojected_image_topic: " << reprojected_image_topic_);
+    RCLCPP_INFO_STREAM(
+        this->get_logger(),
+        "\n  cloud_slam_topic: " << cloud_slam_topic_ << "\n  odometry_topic: " << odometry_topic_
+                                 << "\n  wiwc_topic: " << wiwc_topic_
+                                 << "\n  reprojected_image_topic: " << reprojected_image_topic_);
 
     cloud_sub_.subscribe(this, cloud_slam_topic_);
     odom_sub_.subscribe(this, odometry_topic_);
     wiwc_sub_.subscribe(this, wiwc_topic_);
 
     sync_ = std::make_shared<Sync>(MySyncPolicy(10), cloud_sub_, odom_sub_, wiwc_sub_);
-    sync_->registerCallback(std::bind(&CloudReprojectionRosNode::syncCallback, this, 
-                                       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    sync_->registerCallback(
+        std::bind(
+            &CloudReprojectionRosNode::syncCallback, this, std::placeholders::_1,
+            std::placeholders::_2, std::placeholders::_3));
 
     reprojected_image_pub_ = image_transport::create_publisher(this, reprojected_image_topic_);
 
     RCLCPP_INFO(this->get_logger(), "CloudReprojectionRosNode initialized successfully");
 }
 
-void CloudReprojectionRosNode::loadParameters()
-{
+void CloudReprojectionRosNode::loadParameters() {
     // Declare and get parameters
     this->declare_parameter<std::string>("cloud_slam_topic", "/odin1/cloud_slam");
     this->declare_parameter<std::string>("odometry_topic", "/odin1/odometry");
@@ -93,9 +88,15 @@ void CloudReprojectionRosNode::loadParameters()
     reprojected_image_topic_ = this->get_parameter("reprojected_image_topic").as_string();
 
     // Load camera parameters from calib.yaml file directly
-    std::string package_path = get_package_source_directory();
-    std::string calib_file = package_path + "/config/calib.yaml";
-    
+    std::string calib_file = this->declare_parameter<std::string>("calib_file_path", "");
+    if (calib_file.empty()) {
+        RCLCPP_ERROR(
+            this->get_logger(),
+            "calib_file_path parameter is empty. Pass the generated calibration path from launch.");
+        rclcpp::shutdown();
+        return;
+    }
+
     YAML::Node calib_config;
     try {
         calib_config = YAML::LoadFile(calib_file);
@@ -130,16 +131,14 @@ void CloudReprojectionRosNode::loadParameters()
     CloudReprojector::ExtrinsicParams ext_params;
     try {
         auto Tcl_vec = calib_config["Tcl_0"].as<std::vector<double>>();
-        
-        if (Tcl_vec.size() == 16)
-        {
+
+        if (Tcl_vec.size() == 16) {
             for (int i = 0; i < 4; ++i)
                 for (int j = 0; j < 4; ++j)
                     ext_params.Tcl(i, j) = Tcl_vec[i * 4 + j];
-        }
-        else
-        {
-            RCLCPP_ERROR(this->get_logger(), "Tcl_0 has invalid size: %zu (expected 16)", Tcl_vec.size());
+        } else {
+            RCLCPP_ERROR(
+                this->get_logger(), "Tcl_0 has invalid size: %zu (expected 16)", Tcl_vec.size());
             rclcpp::shutdown();
             return;
         }
@@ -157,87 +156,84 @@ void CloudReprojectionRosNode::loadParameters()
     RCLCPP_INFO_STREAM(this->get_logger(), "Calculated Tic:\n" << ext_params.Tic);
 
     RCLCPP_INFO(this->get_logger(), "Camera intrinsics:");
-    RCLCPP_INFO(this->get_logger(), "Image size: %dx%d", cam_params.image_width, cam_params.image_height);
-    RCLCPP_INFO(this->get_logger(), "Intrinsics: A11=%f A12=%f A22=%f u0=%f v0=%f",
-                cam_params.A11, cam_params.A12, cam_params.A22, cam_params.u0, cam_params.v0);
+    RCLCPP_INFO(
+        this->get_logger(), "Image size: %dx%d", cam_params.image_width, cam_params.image_height);
+    RCLCPP_INFO(
+        this->get_logger(), "Intrinsics: A11=%f A12=%f A22=%f u0=%f v0=%f", cam_params.A11,
+        cam_params.A12, cam_params.A22, cam_params.u0, cam_params.v0);
 
     reprojector_ = std::make_unique<CloudReprojector>();
-    if (!reprojector_->initialize(cam_params, ext_params))
-    {
+    if (!reprojector_->initialize(cam_params, ext_params)) {
         RCLCPP_ERROR(this->get_logger(), "Failed to initialize CloudReprojector");
         rclcpp::shutdown();
     }
 }
 
 void CloudReprojectionRosNode::syncCallback(
-    const PointCloud2::ConstSharedPtr& cloud_msg,
-    const Odometry::ConstSharedPtr& odom_msg,
-    const Odometry::ConstSharedPtr& wiwc_msg)
-{
+    const PointCloud2::ConstSharedPtr& cloud_msg, const Odometry::ConstSharedPtr& odom_msg,
+    const Odometry::ConstSharedPtr& wiwc_msg) {
     // Debug: print that syncCallback is called
     static int sync_count = 0;
     // RCLCPP_INFO(this->get_logger(), "=== syncCallback called, count: %d ===", ++sync_count);
-    
+
     pcl::PointCloud<pcl::PointXYZRGB> cloud_odom;
     pcl::fromROSMsg(*cloud_msg, cloud_odom);
 
-    if (cloud_odom.empty())
-    {
+    if (cloud_odom.empty()) {
         RCLCPP_WARN(this->get_logger(), "Empty cloud_slam received");
         return;
     }
 
     // Extract real-time extrinsics from WIWC message covariance fields
-    // pose.covariance contains T_CL (first 16 values), twist.covariance contains T_IL (first 16 values)
+    // pose.covariance contains T_CL (first 16 values), twist.covariance contains T_IL (first 16
+    // values)
     Eigen::Matrix4d T_CL = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d T_IL = Eigen::Matrix4d::Identity();
     for (int i = 0; i < 16; ++i) {
         T_CL(i / 4, i % 4) = wiwc_msg->pose.covariance[i];
         T_IL(i / 4, i % 4) = wiwc_msg->twist.covariance[i];
     }
-    
+
     // Update extrinsics if valid (not identity matrix)
     bool T_CL_valid = (T_CL - Eigen::Matrix4d::Identity()).norm() > 1e-6;
     bool T_IL_valid = (T_IL - Eigen::Matrix4d::Identity()).norm() > 1e-6;
-    
+
     // // Debug print to compare with host_sdk_sample values
     // static int print_count = 0;
     // if (print_count++) {
     //     // Extract rotation (3x3) and translation (3x1) from T_CL
     //     Eigen::Matrix3d RCL = T_CL.block<3,3>(0,0);
     //     Eigen::Vector3d TCL = T_CL.block<3,1>(0,3);
-    //     RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection RCL (3x3 rotation from T_CL) ===\n" << RCL);
-    //     RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection TCL (3x1 translation from T_CL) ===\n" << TCL.transpose());
-        
+    //     RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection RCL (3x3 rotation from
+    //     T_CL) ===\n" << RCL); RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection TCL
+    //     (3x1 translation from T_CL) ===\n" << TCL.transpose());
+
     //     // Extract rotation (3x3) and translation (3x1) from T_IL
     //     Eigen::Matrix3d RIL = T_IL.block<3,3>(0,0);
     //     Eigen::Vector3d TIL = T_IL.block<3,1>(0,3);
-    //     RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection RIL (3x3 rotation from T_IL) ===\n" << RIL);
-    //     RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection TIL (3x1 translation from T_IL) ===\n" << TIL.transpose());
-        
-    //     RCLCPP_INFO(this->get_logger(), "T_CL_valid: %d, T_IL_valid: %d", T_CL_valid, T_IL_valid);
-    //     if (T_CL_valid && T_IL_valid) {
+    //     RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection RIL (3x3 rotation from
+    //     T_IL) ===\n" << RIL); RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection TIL
+    //     (3x1 translation from T_IL) ===\n" << TIL.transpose());
+
+    //     RCLCPP_INFO(this->get_logger(), "T_CL_valid: %d, T_IL_valid: %d", T_CL_valid,
+    //     T_IL_valid); if (T_CL_valid && T_IL_valid) {
     //         Eigen::Matrix4d Tic = CloudReprojector::calculateTic(T_CL, T_IL);
-    //         RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection calculated Tic ===\n" << Tic);
+    //         RCLCPP_INFO_STREAM(this->get_logger(), "=== cloud_reprojection calculated Tic ===\n"
+    //         << Tic);
     //     }
     // }
-    
+
     if (T_CL_valid && T_IL_valid) {
         reprojector_->updateExtrinsics(T_CL, T_IL);
     }
 
     CloudReprojector::OdomPose odom_pose;
     odom_pose.orientation = Eigen::Quaterniond(
-        odom_msg->pose.pose.orientation.w,
-        odom_msg->pose.pose.orientation.x,
-        odom_msg->pose.pose.orientation.y,
-        odom_msg->pose.pose.orientation.z
-    );
+        odom_msg->pose.pose.orientation.w, odom_msg->pose.pose.orientation.x,
+        odom_msg->pose.pose.orientation.y, odom_msg->pose.pose.orientation.z);
     odom_pose.position = Eigen::Vector3d(
-        odom_msg->pose.pose.position.x,
-        odom_msg->pose.pose.position.y,
-        odom_msg->pose.pose.position.z
-    );
+        odom_msg->pose.pose.position.x, odom_msg->pose.pose.position.y,
+        odom_msg->pose.pose.position.z);
 
     cv::Mat reprojected_img = reprojector_->reprojectCloud(cloud_odom, odom_pose);
 
@@ -246,25 +242,26 @@ void CloudReprojectionRosNode::syncCallback(
 }
 
 // ==================== ROS2 Main ====================
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
 
     auto temp_node = std::make_shared<rclcpp::Node>("cloud_reprojection_check");
-    
+
     // Check if reprojection is enabled from control_command.yaml
-    std::string package_path = get_package_source_directory();
-    std::string config_file = package_path + "/config/control_command.yaml";
-    
+    std::string config_file =
+        temp_node->declare_parameter<std::string>("config_file", getDefaultConfigFilePath());
+
     try {
         YAML::Node config = YAML::LoadFile(config_file);
         std::cout << "config: " << config_file << std::endl;
         if (!config["register_keys"] || !config["register_keys"]["sendreprojection"]) {
-            RCLCPP_INFO(temp_node->get_logger(), "sendreprojection parameter not found, cloud reprojection disabled.");
+            RCLCPP_INFO(
+                temp_node->get_logger(),
+                "sendreprojection parameter not found, cloud reprojection disabled.");
             rclcpp::shutdown();
             return 0;
         }
-        
+
         int sendreprojection = config["register_keys"]["sendreprojection"].as<int>();
         if (sendreprojection == 0) {
             RCLCPP_INFO(temp_node->get_logger(), "Cloud reprojection will not be published.");
@@ -278,31 +275,41 @@ int main(int argc, char** argv)
     }
 
     // Wait for calib.yaml file to be generated by host_sdk_sample
-    std::string calib_file = package_path + "/config/calib.yaml";
+    std::string calib_file = temp_node->declare_parameter<std::string>("calib_file_path", "");
+    if (calib_file.empty()) {
+        RCLCPP_ERROR(
+            temp_node->get_logger(),
+            "calib_file_path parameter is empty. Pass the generated calibration path from launch.");
+        rclcpp::shutdown();
+        return 1;
+    }
     RCLCPP_INFO(temp_node->get_logger(), "Waiting for calib.yaml file at: %s", calib_file.c_str());
-    
+
     int wait_count = 0;
     while (rclcpp::ok() && !fileExists(calib_file)) {
         if (wait_count % 10 == 0) {
             RCLCPP_INFO(temp_node->get_logger(), "Still waiting for calib.yaml file...");
         }
+        // Timeout after 5 seconds
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
         wait_count++;
-        
-        // Timeout after 5 seconds
+
+        // Timeout loop 10, so after 50 seconds,
+        // if the file is still not found, log an error and shutdown
         if (wait_count > 10) {
             RCLCPP_ERROR(temp_node->get_logger(), "Timeout waiting for calib.yaml file");
             rclcpp::shutdown();
             return 1;
         }
     }
-    
+
     if (!rclcpp::ok()) {
         RCLCPP_INFO(temp_node->get_logger(), "Node shutdown before calib.yaml file was found.");
         return 0;
     }
-    
-    RCLCPP_INFO(temp_node->get_logger(), "Found calib.yaml file! Starting cloud reprojection node...");
+
+    RCLCPP_INFO(
+        temp_node->get_logger(), "Found calib.yaml file! Starting cloud reprojection node...");
 
     auto node = std::make_shared<CloudReprojectionRosNode>();
 
@@ -318,14 +325,14 @@ int main(int argc, char** argv)
 // ==================== ROS1 Implementation ====================
 
 CloudReprojectionRosNode::CloudReprojectionRosNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
-    : nh_(nh), pnh_(pnh)
-{
+    : nh_(nh)
+    , pnh_(pnh) {
     loadParameters();
 
-    ROS_INFO_STREAM("\n  cloud_slam_topic: " << cloud_slam_topic_
-                << "\n  odometry_topic: " << odometry_topic_
-                << "\n  wiwc_topic: " << wiwc_topic_
-                << "\n  reprojected_image_topic: " << reprojected_image_topic_);
+    ROS_INFO_STREAM(
+        "\n  cloud_slam_topic: " << cloud_slam_topic_ << "\n  odometry_topic: " << odometry_topic_
+                                 << "\n  wiwc_topic: " << wiwc_topic_
+                                 << "\n  reprojected_image_topic: " << reprojected_image_topic_);
 
     cloud_sub_.subscribe(nh_, cloud_slam_topic_, 1);
     odom_sub_.subscribe(nh_, odometry_topic_, 1);
@@ -339,12 +346,14 @@ CloudReprojectionRosNode::CloudReprojectionRosNode(ros::NodeHandle& nh, ros::Nod
     ROS_INFO("CloudReprojectionRosNode initialized successfully");
 }
 
-void CloudReprojectionRosNode::loadParameters()
-{
-    pnh_.param<std::string>("cloud_slam_topic", cloud_slam_topic_, std::string("/odin1/cloud_slam"));
+void CloudReprojectionRosNode::loadParameters() {
+    pnh_.param<std::string>(
+        "cloud_slam_topic", cloud_slam_topic_, std::string("/odin1/cloud_slam"));
     pnh_.param<std::string>("odometry_topic", odometry_topic_, std::string("/odin1/odometry"));
     pnh_.param<std::string>("wiwc_topic", wiwc_topic_, std::string("/odin1/wiwc"));
-    pnh_.param<std::string>("reprojected_image_topic", reprojected_image_topic_, std::string("/odin1/reprojected_image"));
+    pnh_.param<std::string>(
+        "reprojected_image_topic", reprojected_image_topic_,
+        std::string("/odin1/reprojected_image"));
 
     // Load camera parameters
     CloudReprojector::CameraParams cam_params;
@@ -365,14 +374,11 @@ void CloudReprojectionRosNode::loadParameters()
     // Load extrinsic parameters
     CloudReprojector::ExtrinsicParams ext_params;
     std::vector<double> Tcl_vec_param;
-    if (pnh_.getParam("Tcl_0", Tcl_vec_param) && Tcl_vec_param.size() == 16)
-    {
+    if (pnh_.getParam("Tcl_0", Tcl_vec_param) && Tcl_vec_param.size() == 16) {
         for (int i = 0; i < 4; ++i)
             for (int j = 0; j < 4; ++j)
                 ext_params.Tcl(i, j) = Tcl_vec_param[i * 4 + j];
-    }
-    else
-    {
+    } else {
         ROS_ERROR("Tcl_0 param missing or invalid.");
         ros::shutdown();
         return;
@@ -387,40 +393,38 @@ void CloudReprojectionRosNode::loadParameters()
 
     ROS_INFO("Camera intrinsics:");
     ROS_INFO("Image size: %dx%d", cam_params.image_width, cam_params.image_height);
-    ROS_INFO("Intrinsics: A11=%f A12=%f A22=%f u0=%f v0=%f",
-             cam_params.A11, cam_params.A12, cam_params.A22, cam_params.u0, cam_params.v0);
+    ROS_INFO(
+        "Intrinsics: A11=%f A12=%f A22=%f u0=%f v0=%f", cam_params.A11, cam_params.A12,
+        cam_params.A22, cam_params.u0, cam_params.v0);
 
     reprojector_ = std::make_unique<CloudReprojector>();
-    if (!reprojector_->initialize(cam_params, ext_params))
-    {
+    if (!reprojector_->initialize(cam_params, ext_params)) {
         ROS_ERROR("Failed to initialize CloudReprojector");
         ros::shutdown();
     }
 }
 
 void CloudReprojectionRosNode::syncCallback(
-    const sensor_msgs::PointCloud2ConstPtr& cloud_msg,
-    const nav_msgs::OdometryConstPtr& odom_msg,
-    const nav_msgs::OdometryConstPtr& wiwc_msg)
-{
+    const sensor_msgs::PointCloud2ConstPtr& cloud_msg, const nav_msgs::OdometryConstPtr& odom_msg,
+    const nav_msgs::OdometryConstPtr& wiwc_msg) {
     pcl::PointCloud<pcl::PointXYZRGB> cloud_odom;
     pcl::fromROSMsg(*cloud_msg, cloud_odom);
 
-    if (cloud_odom.empty())
-    {
+    if (cloud_odom.empty()) {
         ROS_WARN("Empty cloud_slam received");
         return;
     }
 
     // Extract real-time extrinsics from WIWC message covariance fields
-    // pose.covariance contains T_CL (first 16 values), twist.covariance contains T_IL (first 16 values)
+    // pose.covariance contains T_CL (first 16 values), twist.covariance contains T_IL (first 16
+    // values)
     Eigen::Matrix4d T_CL = Eigen::Matrix4d::Identity();
     Eigen::Matrix4d T_IL = Eigen::Matrix4d::Identity();
     for (int i = 0; i < 16; ++i) {
         T_CL(i / 4, i % 4) = wiwc_msg->pose.covariance[i];
         T_IL(i / 4, i % 4) = wiwc_msg->twist.covariance[i];
     }
-    
+
     // Update extrinsics if valid (not identity matrix)
     bool T_CL_valid = (T_CL - Eigen::Matrix4d::Identity()).norm() > 1e-6;
     bool T_IL_valid = (T_IL - Eigen::Matrix4d::Identity()).norm() > 1e-6;
@@ -430,72 +434,62 @@ void CloudReprojectionRosNode::syncCallback(
 
     CloudReprojector::OdomPose odom_pose;
     odom_pose.orientation = Eigen::Quaterniond(
-        odom_msg->pose.pose.orientation.w,
-        odom_msg->pose.pose.orientation.x,
-        odom_msg->pose.pose.orientation.y,
-        odom_msg->pose.pose.orientation.z
-    );
+        odom_msg->pose.pose.orientation.w, odom_msg->pose.pose.orientation.x,
+        odom_msg->pose.pose.orientation.y, odom_msg->pose.pose.orientation.z);
     odom_pose.position = Eigen::Vector3d(
-        odom_msg->pose.pose.position.x,
-        odom_msg->pose.pose.position.y,
-        odom_msg->pose.pose.position.z
-    );
+        odom_msg->pose.pose.position.x, odom_msg->pose.pose.position.y,
+        odom_msg->pose.pose.position.z);
 
     cv::Mat reprojected_img = reprojector_->reprojectCloud(cloud_odom, odom_pose);
 
-    sensor_msgs::ImagePtr img_msg = cv_bridge::CvImage(cloud_msg->header, "bgr8", reprojected_img).toImageMsg();
+    sensor_msgs::ImagePtr img_msg =
+        cv_bridge::CvImage(cloud_msg->header, "bgr8", reprojected_img).toImageMsg();
     reprojected_image_pub_.publish(img_msg);
 }
 
 // ==================== ROS1 Main ====================
-int main(int argc, char **argv)
-{
+int main(int argc, char** argv) {
     ros::init(argc, argv, "cloud_reprojection");
     ros::NodeHandle nh;
     ros::NodeHandle pnh("~");
-    
+
     // Check if reprojection is enabled
     int sendreprojection = 0;
     pnh.param("register_keys/sendreprojection", sendreprojection, 0);
-    if(sendreprojection == 0)
-    {
+    if (sendreprojection == 0) {
         ROS_INFO("Cloud reprojection will not be published.");
         return 0;
     }
-    
+
     std::string calib_file_path;
     pnh.param<std::string>("calib_file_path", calib_file_path, "");
-    
+
     ROS_INFO("Waiting for calib.yaml file at: %s", calib_file_path.c_str());
-    while(ros::ok() && !fileExists(calib_file_path))
-    {
+    while (ros::ok() && !fileExists(calib_file_path)) {
         ROS_INFO_THROTTLE(5, "Still waiting for calib.yaml file...");
-        ros::Duration(0.5).sleep(); 
+        ros::Duration(0.5).sleep();
         ros::spinOnce();
     }
-    
-    if(!ros::ok())
-    {
+
+    if (!ros::ok()) {
         ROS_INFO("Node shutdown before calib.yaml file was found.");
         return 0;
     }
-    
+
     ROS_INFO("Found calib.yaml file! Loading parameters...");
-    
+
     std::string node_name = ros::this_node::getName();
     std::string rosparam_command = "rosparam load " + calib_file_path + " " + node_name;
     int result = system(rosparam_command.c_str());
-    
-    if(result == 0)
-    {
-        ROS_INFO("Successfully loaded parameters from calib.yaml to namespace: %s", node_name.c_str());
-    }
-    else
-    {
+
+    if (result == 0) {
+        ROS_INFO(
+            "Successfully loaded parameters from calib.yaml to namespace: %s", node_name.c_str());
+    } else {
         ROS_ERROR("Failed to load parameters from calib.yaml");
         return 1;
     }
-    
+
     CloudReprojectionRosNode reprojection_node(nh, pnh);
     ros::spin();
     return 0;
