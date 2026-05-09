@@ -4,6 +4,7 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
@@ -47,6 +48,12 @@ def generate_launch_description():
         "rviz_config",
         default_value=os.path.join(package_dir, "config", "odin_ros2.rviz"),
         description="Path to RViz2 config file",
+    )
+
+    launch_rviz_arg = DeclareLaunchArgument(
+        "launch_rviz",
+        default_value="false",
+        description="Start RViz2. Keep false on headless MiniPC/runtime containers.",
     )
 
     # Create main node
@@ -113,6 +120,7 @@ def generate_launch_description():
         name="rviz2",
         output="screen",
         arguments=["-d", LaunchConfiguration("rviz_config")],
+        condition=IfCondition(LaunchConfiguration("launch_rviz")),
     )
 
     # Create launch description
@@ -121,6 +129,7 @@ def generate_launch_description():
     ld.add_action(runtime_dir_arg)
     ld.add_action(calib_file_arg)
     ld.add_action(rviz_config_arg)  # Add RViz configuration argument
+    ld.add_action(launch_rviz_arg)
     ld.add_action(host_sdk_node)
     ld.add_action(pcd2depth_node)
     ld.add_action(cloud_reprojection_node)

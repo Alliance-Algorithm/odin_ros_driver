@@ -127,6 +127,16 @@ double get_ptp_smoothed_offset() { return g_ptp_offset_smooth.load(std::memory_o
 // usb device
 static std::string TARGET_VENDOR = "2207";
 static std::string TARGET_PRODUCT = "0019";
+
+static std::string trim_copy(std::string value) {
+    const auto first = value.find_first_not_of(" \n\r\t");
+    if (first == std::string::npos) {
+        return "";
+    }
+    const auto last = value.find_last_not_of(" \n\r\t");
+    return value.substr(first, last - first + 1);
+}
+
 // Global configuration variables
 int g_sendrgb = 1;
 int g_sendimu = 1;
@@ -576,93 +586,122 @@ static void process_command_file() {
 
 // detect USB3.0
 bool isUsb3OrHigher(const std::string& vendorId, const std::string& productId) {
-    std::string command = "lsusb -d " + vendorId + ":" + productId + " -v | grep 'bcdUSB'";
-
-    std::array<char, 128> buffer;
-    std::string result;
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
-    if (!pipe) {
-        throw std::runtime_error("popen() failed!");
-    }
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
-    }
-
-    if (result.empty()) {
+    std::error_code ec;
+    const std::filesystem::path devices_dir{"/sys/bus/usb/devices"};
+    if (!std::filesystem::is_directory(devices_dir, ec)) {
 #ifdef ROS2
-        RCLCPP_ERROR(rclcpp::get_logger("usb_check"), "Failed to get USB version information");
+        RCLCPP_ERROR(rclcpp::get_logger("usb_check"), "Failed to open /sys/bus/usb/devices");
 #else
-        ROS_ERROR("Failed to get USB version information");
+        ROS_ERROR("Failed to open /sys/bus/usb/devices");
 #endif
         return false;
     }
 
-    // find bcdUSB
-    size_t pos = result.find("bcdUSB");
-    if (pos == std::string::npos) {
+    for (const auto& entry : std::filesystem::directory_iterator(devices_dir, ec)) {
+        if (ec) {
+            break;
+        }
+        if (!entry.is_directory()) {
+            continue;
+        }
+
+        const auto line = entry.path().filename().string();
+        if (line.empty() || line.find('.') != std::string::npos) {
+            continue;
+        }
+
+        const std::filesystem::path device_dir = entry.path();
+        std::ifstream vendorFile(device_dir / "idVendor");
+        std::ifstream productFile(device_dir / "idProduct");
+        if (!vendorFile.is_open() || !productFile.is_open()) {
+            continue;
+        }
+
+        std::string vendorContent;
+        std::string productContent;
+        std::getline(vendorFile, vendorContent);
+        std::getline(productFile, productContent);
+        if (trim_copy(vendorContent) != vendorId || trim_copy(productContent) != productId) {
+            continue;
+        }
+
+        std::ifstream versionFile(device_dir / "version");
+        if (!versionFile.is_open()) {
 #ifdef ROS2
-        RCLCPP_ERROR(rclcpp::get_logger("usb_check"), "bcdUSB field not found in lsusb output");
+            RCLCPP_ERROR(
+                rclcpp::get_logger("usb_check"), "USB version file not found for device %s",
+                line.c_str());
 #else
-        ROS_ERROR("bcdUSB field not found in lsusb output");
+            ROS_ERROR("USB version file not found for device %s", line.c_str());
 #endif
-        return false;
+            return false;
+        }
+
+        std::string versionStr;
+        std::getline(versionFile, versionStr);
+        const float version = std::stof(trim_copy(versionStr));
+
+#ifdef ROS2
+        RCLCPP_INFO(rclcpp::get_logger("usb_check"), "Detected USB version: %.1f", version);
+#else
+        ROS_INFO("Detected USB version: %.1f", version);
+#endif
+        if (!g_strict_usb3_0_check) {
+#ifdef ROS2
+            RCLCPP_INFO(rclcpp::get_logger("usb_check"), "Strict USB3.0 check disabled");
+#else
+            ROS_INFO("Strict USB3.0 check disabled");
+#endif
+            return true;
+        }
+        return version >= 3.0;
     }
 
-    std::string versionStr = result.substr(pos + 7); // "bcdUSB" + space
-    float version = std::stof(versionStr);
-
 #ifdef ROS2
-    RCLCPP_INFO(rclcpp::get_logger("usb_check"), "Detected USB version: %.1f", version);
+    RCLCPP_ERROR(
+        rclcpp::get_logger("usb_check"), "USB device %s:%s not found", vendorId.c_str(),
+        productId.c_str());
 #else
-    ROS_INFO("Detected USB version: %.1f", version);
+    ROS_ERROR("USB device %s:%s not found", vendorId.c_str(), productId.c_str());
 #endif
-    if (!g_strict_usb3_0_check) {
-#ifdef ROS2
-        RCLCPP_INFO(rclcpp::get_logger("usb_check"), "Strict USB3.0 check disabled");
-#else
-        ROS_INFO("Strict USB3.0 check disabled");
-#endif
-        return true;
-    }
-    return version >= 3.0;
+    return false;
 }
 
 bool isUsbDevicePresent(const std::string& vendorId, const std::string& productId) {
-    std::ifstream devicesList("/sys/bus/usb/devices");
-    if (devicesList.is_open()) {
-        std::string line;
-        while (std::getline(devicesList, line)) {
-            if (line.find('.') != std::string::npos)
-                continue;
-            if (line.empty())
-                continue;
+    std::error_code ec;
+    const std::filesystem::path devices_dir{"/sys/bus/usb/devices"};
+    if (!std::filesystem::is_directory(devices_dir, ec)) {
+        return false;
+    }
 
-            std::string vendorPath = "/sys/bus/usb/devices/" + line + "/idVendor";
-            std::ifstream vendorFile(vendorPath);
-            if (vendorFile.is_open()) {
-                std::string vendorContent;
-                if (std::getline(vendorFile, vendorContent)) {
-                    vendorContent.erase(vendorContent.find_last_not_of(" \n\r\t") + 1);
+    for (const auto& entry : std::filesystem::directory_iterator(devices_dir, ec)) {
+        if (ec) {
+            break;
+        }
+        if (!entry.is_directory()) {
+            continue;
+        }
 
-                    std::string productPath = "/sys/bus/usb/devices/" + line + "/idProduct";
-                    std::ifstream productFile(productPath);
-                    if (productFile.is_open()) {
-                        std::string productContent;
-                        if (std::getline(productFile, productContent)) {
-                            productContent.erase(productContent.find_last_not_of(" \n\r\t") + 1);
+        const auto line = entry.path().filename().string();
+        if (line.empty() || line.find('.') != std::string::npos) {
+            continue;
+        }
 
-                            if (vendorContent == vendorId && productContent == productId) {
-                                return true;
-                            }
-                        }
-                        productFile.close();
-                    }
-                }
-                vendorFile.close();
+        std::ifstream vendorFile(entry.path() / "idVendor");
+        std::ifstream productFile(entry.path() / "idProduct");
+        if (!vendorFile.is_open() || !productFile.is_open()) {
+            continue;
+        }
+
+        std::string vendorContent;
+        std::string productContent;
+        if (std::getline(vendorFile, vendorContent) && std::getline(productFile, productContent)) {
+            if (trim_copy(vendorContent) == vendorId && trim_copy(productContent) == productId) {
+                return true;
             }
         }
-        devicesList.close();
     }
+
     return false;
 }
 // Convert calib.yaml to cam_in_ex.txt
@@ -2080,6 +2119,11 @@ int main(int argc, char* argv[]) {
             std::filesystem::create_directories(map_root_dir_);
         }
 
+#ifdef ROS2
+        RCLCPP_INFO(node->get_logger(), "Initializing Odin lidar SDK");
+#else
+        ROS_INFO("Initializing Odin lidar SDK");
+#endif
         if (lidar_system_init(lidar_device_callback)) {
 #ifdef ROS2
             RCLCPP_ERROR(node->get_logger(), "Lidar system init failed");
@@ -2088,6 +2132,11 @@ int main(int argc, char* argv[]) {
 #endif
             return -1;
         }
+#ifdef ROS2
+        RCLCPP_INFO(node->get_logger(), "Odin lidar SDK initialized");
+#else
+        ROS_INFO("Odin lidar SDK initialized");
+#endif
 
         // Configure SDK IMU smooth sending AFTER lidar_system_init
         // SDK now defaults to disabled, only enable if configured
@@ -2109,8 +2158,6 @@ int main(int argc, char* argv[]) {
 #endif
         }
 
-        bool usbPresent = false;
-        bool usbVersionChecked = false;
         while (!deviceConnected) {
 #ifdef ROS2
             if (!rclcpp::ok()) {
@@ -2123,28 +2170,15 @@ int main(int argc, char* argv[]) {
             }
 #endif
 
-            usbPresent = isUsbDevicePresent(TARGET_VENDOR, TARGET_PRODUCT);
-            if (usbPresent) {
-                if (!usbVersionChecked) {
-                    usbVersionChecked = true;
-
-                    if (!isUsb3OrHigher(TARGET_VENDOR, TARGET_PRODUCT)) {
 #ifdef ROS2
-                        RCLCPP_FATAL(
-                            node->get_logger(),
-                            "Device connected to USB 2.0 port. This device requires USB 3.0 or "
-                            "higher. Exiting program.Please use USB 3.0 and restart the device.");
+            RCLCPP_INFO_ONCE(
+                node->get_logger(), "Waiting for Odin SDK device callback for USB %s:%s",
+                TARGET_VENDOR.c_str(), TARGET_PRODUCT.c_str());
 #else
-                        ROS_FATAL(
-                            "Device connected to USB 2.0 port. This device requires USB 3.0 or "
-                            "higher. Exiting program .Please use USB 3.0 and restart the device.");
+            ROS_INFO_ONCE(
+                "Waiting for Odin SDK device callback for USB %s:%s", TARGET_VENDOR.c_str(),
+                TARGET_PRODUCT.c_str());
 #endif
-
-                        lidar_system_deinit();
-                        return 1;
-                    }
-                }
-            }
 
 #ifdef ROS2
             std::this_thread::sleep_for(std::chrono::seconds(1));
