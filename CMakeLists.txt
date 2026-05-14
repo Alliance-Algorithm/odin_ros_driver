@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
 project(odin_ros_driver)
 
-
 if(DEFINED BUILD_SYSTEM)
     set(ROS_VERSION ${BUILD_SYSTEM})
     message(STATUS "ROS_VERSION: ${ROS_VERSION}")
@@ -219,7 +218,7 @@ if(ROS_VERSION STREQUAL "ROS1")
     install(TARGETS host_sdk_sample
         RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
     )
-    
+
     install(DIRECTORY include/
         DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
         FILES_MATCHING PATTERN "*.h"
@@ -380,7 +379,17 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     install(FILES package.xml
         DESTINATION share/${PROJECT_NAME}
     )
-    
+
+    install(PROGRAMS
+        script/remapping.py
+        script/tmux-launch.sh
+        DESTINATION share/${PROJECT_NAME}/script
+    )
+
+    install(PROGRAMS script/tmux-launch.sh
+        DESTINATION lib/${PROJECT_NAME}
+    )
+     
     # Install headers
     install(DIRECTORY include/
         DESTINATION include
