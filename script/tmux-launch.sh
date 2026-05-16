@@ -25,9 +25,13 @@ fi
 if tmux has-session -t odin 2>/dev/null; then
     echo "[odin-tmux] old session found, restarting"
     tmux kill-session -t odin
+    sleep 4
 fi
 
 tmux new-session -d -s odin -n driver \
     "bash -lc 'source \"$env_setup_file\" && ros2 launch odin_ros_driver odin1_ros2.launch.py'"
+
+tmux new-window -t odin -n mavros \
+    "bash -lc 'source \"$env_setup_file\" && ros2 launch odin_ros_driver mavros_adapt.launch.py'"
 
 echo "[odin-tmux] ready (tmux attach -t odin)"

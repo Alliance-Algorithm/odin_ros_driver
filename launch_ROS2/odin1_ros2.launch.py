@@ -7,7 +7,6 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
-
 def load_yaml_params(package_dir, config_name):
     config_path = os.path.join(package_dir, "config", config_name)
     with open(config_path, "r") as file:
@@ -99,13 +98,6 @@ def generate_launch_description():
         parameters=[overlay_params],
     )
 
-    remapping_script = os.path.join(package_dir, "script", "remapping.py")
-    remapping_node = Node(
-        executable=remapping_script,
-        name="flight_mavros_remapping",
-        output="screen",
-    )
-
     # Create launch description
     ld = LaunchDescription()
     ld.add_action(config_file_arg)
@@ -115,6 +107,5 @@ def generate_launch_description():
     ld.add_action(pcd2depth_node)
     ld.add_action(cloud_reprojection_node)
     ld.add_action(image_overlay_node)
-    ld.add_action(remapping_node)
 
     return ld

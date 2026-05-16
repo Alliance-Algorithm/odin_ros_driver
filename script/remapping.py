@@ -10,7 +10,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
 
-ODOMETRY_TIMEOUT_SEC = 5.0
+ODOMETRY_TIMEOUT_SEC = 10.0
 
 
 def quaternion_multiply(
