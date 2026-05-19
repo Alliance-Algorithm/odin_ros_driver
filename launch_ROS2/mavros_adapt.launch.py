@@ -22,7 +22,7 @@ def generate_launch_description():
             os.path.join(mavros_share, "launch", "px4_pluginlists.yaml"),
             os.path.join(mavros_share, "launch", "px4_config.yaml"),
             {
-                "fcu_url": "serial:///dev/ttyACM0:921600",
+                "fcu_url": "serial:///dev/ttyUSB0:460800",
                 "gcs_url": "",
                 "tgt_system": 1,
                 "tgt_component": 1,
